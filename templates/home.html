@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Construction QA/QC{% endblock %}
+{% block content %}
+<h1>Construction QA/QC</h1>
+<p class="lead">Upload a jobsite photo from your phone or computer and run it against the company checklist.</p>
+
+<div class="card-grid">
+  <a class="card" href="{{ url_for('evaluate') }}">
+    <h2>Evaluate a Photo</h2>
+    <p>Upload one or more photos and run them against the QA/QC issue checklist.</p>
+  </a>
+  <a class="card" href="{{ url_for('checklists_list') }}">
+    <h2>Checklists</h2>
+    <p>Create a new checklist or view/download existing ones.</p>
+  </a>
+  <a class="card" href="{{ url_for('submittals') }}">
+    <h2>Check a Submittal</h2>
+    <p>Confirm a submittal matches a checklist requirement.</p>
+  </a>
+  <a class="card" href="{{ url_for('library') }}">
+    <h2>Library</h2>
+    <p>Manage the QA/QC checklist spreadsheet and submittal files.</p>
+  </a>
+</div>
+{% endblock %}

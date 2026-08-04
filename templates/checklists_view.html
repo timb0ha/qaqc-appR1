@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ filename }}{% endblock %}
+{% block content %}
+<h1>{{ filename }}</h1>
+<a class="button-link" href="{{ url_for('checklists_download', filename=filename) }}">Download Excel</a>
+
+<table class="items-table">
+  <thead>
+    <tr><th>#</th><th>Category</th><th>Requirement</th><th>Status</th><th>Photo</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    {% for it in items %}
+    <tr>
+      <td>{{ it.item_no }}</td>
+      <td>{{ it.category }}</td>
+      <td>{{ it.requirement }}</td>
+      <td><span class="badge badge-{{ (it.status or '')|lower|replace(' ', '-') }}">{{ it.status or '-' }}</span></td>
+      <td>{{ it.photo_ref or '-' }}</td>
+      <td class="notes-cell">{{ it.notes or '-' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

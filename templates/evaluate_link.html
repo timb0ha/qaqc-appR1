@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Link to Checklist{% endblock %}
+{% block content %}
+<h1>Write finding into a checklist</h1>
+<p class="hint">Photo: {{ photo_name }}</p>
+
+{% if not checklists %}
+  <p>No checklists yet. <a href="{{ url_for('checklists_new') }}">Create one first</a>.</p>
+{% else %}
+<form method="post" class="stack">
+  <input type="hidden" name="photo" value="{{ photo_name }}">
+  <input type="hidden" name="report" value="{{ report_filename }}">
+
+  <label>Status
+    <select name="status">
+      {% for s in ["Pass", "Fail", "N/A", "Needs Verification"] %}
+        <option value="{{ s }}" {% if s == suggested_status %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <p class="hint">Suggested: {{ suggested_status }} (based on the checklist findings) — change if needed.</p>
+
+  <fieldset>
+    <legend>Choose the checklist item to update</legend>
+    {% for c in checklists %}
+      <h3>{{ c.filename }}</h3>
+      {% for it in c.rows %}
+        <label class="radio-row">
+          <input type="radio" name="checklist_row" value="{{ c.filename }}|{{ it.row }}" required>
+          #{{ it.item_no }} ({{ it.category }}): {{ it.requirement }}
+        </label>
+      {% endfor %}
+    {% endfor %}
+  </fieldset>
+
+  <button type="submit">Write to Checklist</button>
+</form>
+{% endif %}
+{% endblock %}

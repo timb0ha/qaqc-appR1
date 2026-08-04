@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Evaluation Results{% endblock %}
+{% block content %}
+<h1>Evaluation Results</h1>
+
+{% for r in results %}
+<section class="report-card">
+  <h2>{{ r.photo_name }}</h2>
+
+  {% if r.error %}
+    <p class="flash flash-error">{{ r.error }}</p>
+  {% else %}
+    <p><span class="badge badge-{{ r.suggested_status|lower|replace(' ', '-') }}">{{ r.suggested_status }}</span></p>
+    <pre class="report-text">{{ r.report_text }}</pre>
+
+    <details>
+      <summary>Save this finding to the library</summary>
+      <form method="post" action="{{ url_for('evaluate_save_to_library') }}" class="stack">
+        <input type="hidden" name="photo" value="{{ r.saved_photo_name }}">
+        <input type="hidden" name="report" value="{{ r.report_filename }}">
+        <label>Comment (leave blank to reuse the report text)
+          <textarea name="comment" rows="2"></textarea>
+        </label>
+        <label>CSI Division / Category<input type="text" name="category"></label>
+        <label>Severity<input type="text" name="severity" placeholder="Critical / Major / Minor / Observation"></label>
+        <label>Keywords/tags<input type="text" name="keywords"></label>
+        <label>Your name<input type="text" name="added_by"></label>
+        <button type="submit">Save to Library</button>
+      </form>
+    </details>
+
+    <a class="button-link" href="{{ url_for('evaluate_link', photo=r.saved_photo_name, report=r.report_filename) }}">
+      Write this into a checklist
+    </a>
+  {% endif %}
+</section>
+{% endfor %}
+
+<a class="button-link" href="{{ url_for('evaluate') }}">Evaluate more photos</a>
+{% endblock %}
