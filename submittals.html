@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Email Report{% endblock %}
+{% block content %}
+<h1>Email this report</h1>
+<p class="hint">Photo: {{ photo_name }}</p>
+
+{% if not email_configured %}
+<div class="flash flash-error">
+  Email isn't set up on the server yet. Ask whoever manages Render to add the SMTP_HOST,
+  SMTP_USER, and SMTP_PASSWORD environment variables. In the meantime you can still
+  <a href="{{ url_for('evaluate_pdf', photo=photo_name, report=report_filename) }}">download the PDF</a>
+  and attach it manually.
+</div>
+{% endif %}
+
+<form method="post" class="stack">
+  <input type="hidden" name="photo" value="{{ photo_name }}">
+  <input type="hidden" name="report" value="{{ report_filename }}">
+  <label>Recipient email
+    <input type="email" name="recipient" required {% if not email_configured %}disabled{% endif %}>
+  </label>
+  <button type="submit" {% if not email_configured %}disabled{% endif %}>Send</button>
+</form>
+
+<a class="button-link" href="{{ url_for('evaluate_pdf', photo=photo_name, report=report_filename) }}">Download PDF instead</a>
+{% endblock %}

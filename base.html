@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Submittal Check Result{% endblock %}
+{% block content %}
+<h1>Submittal Check: {{ filename }}</h1>
+<pre class="report-text">{{ report_text }}</pre>
+<a class="button-link" href="{{ url_for('submittals') }}">Check another submittal</a>
+{% endblock %}

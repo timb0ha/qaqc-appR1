@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Evaluate a Photo{% endblock %}
+{% block content %}
+<h1>Evaluate a Photo</h1>
+
+{% if diag %}
+<div class="flash flash-error">
+  <strong>Checklist setup problem</strong> — evaluations will run as a general review only, without your Issue checklist.<br>
+  {{ diag }}<br>
+  Fix this from the <a href="{{ url_for('library') }}">Library</a> page.
+</div>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data" class="stack">
+  <label>Photo(s)
+    <input type="file" name="photos" accept="image/*" multiple required>
+  </label>
+  <p class="hint">On a phone, this opens your camera or photo library. You can select multiple photos.</p>
+
+  <label>Context for these photos (optional)
+    <textarea name="notes" rows="3" placeholder="e.g. Level 4, north wing, MEP rough-in"></textarea>
+  </label>
+
+  {% if criteria %}
+  <fieldset>
+    <legend>Checklist issues to evaluate</legend>
+    <p class="hint">All preset issues are selected by default — uncheck any that don't apply to this photo. The preset list itself can only be changed by uploading a new spreadsheet on the Library page.</p>
+    {% for c in criteria %}
+      <label class="checkbox-row">
+        <input type="checkbox" name="selected_issues" value="{{ c['Issue'] }}" checked>
+        {{ c['Issue'] }}
+      </label>
+    {% endfor %}
+  </fieldset>
+  {% endif %}
+
+  <label>Additional criteria for this evaluation (optional, one per line)
+    <textarea name="additional_criteria" rows="3" placeholder="e.g. Confirm exit signage is illuminated"></textarea>
+  </label>
+  <p class="hint">These apply to this evaluation only — they are not saved to the preset checklist.</p>
+
+  <button type="submit">Evaluate</button>
+</form>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}New Checklist{% endblock %}
+{% block content %}
+<h1>New Checklist</h1>
+<form method="post" class="stack">
+  <label>Project Name<input type="text" name="project" required></label>
+  <label>Location / Area<input type="text" name="location"></label>
+  <label>Inspector<input type="text" name="inspector"></label>
+  <button type="submit">Create</button>
+</form>
+{% endblock %}

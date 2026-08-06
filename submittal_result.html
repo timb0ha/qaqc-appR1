@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Checklists{% endblock %}
+{% block content %}
+<h1>Checklists</h1>
+<a class="button-link" href="{{ url_for('checklists_new') }}">+ New Checklist</a>
+
+{% if not files %}
+  <p>No checklists yet.</p>
+{% else %}
+<ul class="file-list">
+  {% for f in files %}
+    <li>
+      <a href="{{ url_for('checklists_view', filename=f.name) }}">{{ f.name }}</a>
+      <a class="muted-link" href="{{ url_for('checklists_download', filename=f.name) }}">Download</a>
+    </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}
