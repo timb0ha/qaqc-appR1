@@ -15,6 +15,8 @@ from pathlib import Path
 
 import anthropic
 
+import photo_evaluator as pe  # reuse its image resize/EXIF-rotation logic for image submittals
+
 SUBMITTALS_DIR = Path("submittals")
 MODEL = "claude-sonnet-4-6"
 
@@ -43,7 +45,7 @@ def check_submittal(submittal_path: Path, requirement_text: str) -> str:
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set. Export it in your shell before running.")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=4)  # ride out brief upstream 5xx/502 blips
 
     content = [{"type": "text", "text": f"Checklist requirement:\n{requirement_text}\n\nSubmittal file: {submittal_path.name}"}]
 
@@ -51,9 +53,8 @@ def check_submittal(submittal_path: Path, requirement_text: str) -> str:
         text = submittal_path.read_text(errors="ignore")[:6000]
         content.append({"type": "text", "text": f"Submittal content:\n{text}"})
     elif submittal_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
-        mime, _ = mimetypes.guess_type(str(submittal_path))
-        data = base64.standard_b64encode(submittal_path.read_bytes()).decode("utf-8")
-        content.append({"type": "image", "source": {"type": "base64", "media_type": mime or "image/jpeg", "data": data}})
+        mime, data = pe._encode_image(submittal_path)
+        content.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}})
     else:
         content.append({"type": "text", "text": "(Unsupported file type for beta — convert to .txt or an image first.)"})
 

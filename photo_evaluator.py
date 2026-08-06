@@ -22,6 +22,7 @@ Requires: ANTHROPIC_API_KEY environment variable set to a real key from console.
 (NOT the placeholder "sk-ant-...").
 """
 import base64
+import io
 import mimetypes
 import os
 import re
@@ -32,6 +33,12 @@ from pathlib import Path
 import anthropic
 import openpyxl
 from openpyxl.utils import get_column_letter
+
+try:
+    from PIL import Image, ImageOps
+    _PIL_AVAILABLE = True
+except ImportError:
+    _PIL_AVAILABLE = False
 
 LIBRARY_DIR = Path("library")
 LIBRARY_PHOTOS_DIR = LIBRARY_DIR / "photos"
@@ -47,6 +54,8 @@ MAX_LIBRARY_MATCHES = 5      # stored-feedback entries to include
 MAX_LIBRARY_IMAGES = 3       # matched feedback reference photos to actually attach (cost control)
 MAX_TRAINING_EXAMPLES_PER_ISSUE = 3
 MAX_SUBMITTAL_CHARS = 4000
+MAX_IMAGE_DIMENSION = 1568   # Anthropic's recommended max long-edge for vision; larger gets downscaled anyway
+MAX_IMAGE_BYTES = 4 * 1024 * 1024   # stay comfortably under the API's ~5MB per-image limit
 
 SYSTEM_PROMPT = """You are a construction Quality Assurance / Quality Control (QA/QC) inspector \
 assistant for Cauldwell Wingate. You evaluate a jobsite photo against the company's structured \
@@ -55,8 +64,11 @@ QA/QC issue checklist.
 You are given, in this order of use:
 
 1. AN ISSUE CHECKLIST with assessment criteria (from the company's QA/QC Agent Training \
-spreadsheet). Evaluate the photo against EVERY issue in this list, in the order given. This is \
-the authoritative checklist — address every issue, even if only to say it isn't visible here.
+spreadsheet, possibly narrowed to a subset the inspector chose for this photo, and possibly \
+including additional criteria the inspector wrote in just for this evaluation — those are \
+clearly marked as such). Evaluate the photo against EVERY issue in this list, in the order \
+given. This is the authoritative checklist for this evaluation — address every issue, even if \
+only to say it isn't visible here.
 2. TRAINING EXAMPLES for issues that have them: real prior photos annotated as "Defect" or "Good \
 Practice," with severity, location, and observation notes. Use these to calibrate what counts as \
 a defect vs. an acceptable condition for that issue. They are reference examples only — do not \
@@ -147,10 +159,15 @@ def _norm_issue(text) -> str:
 
 
 def load_criteria() -> list[dict]:
-    """Read the 'Criteria' tab: list of {'Issue': ..., 'Assessment criteria': ...}."""
+    """Read the 'Criteria' tab: list of {'Issue': ..., 'Assessment criteria': ...}. Degrades to
+    an empty list (rather than raising) if the file is missing, corrupted, or unreadable — the
+    caller falls back to a general review, and diagnose_criteria_setup() explains why."""
     if not CRITERIA_XLSX.exists():
         return []
-    wb = openpyxl.load_workbook(CRITERIA_XLSX, data_only=True)
+    try:
+        wb = openpyxl.load_workbook(CRITERIA_XLSX, data_only=True)
+    except Exception:
+        return []
     if "Criteria" not in wb.sheetnames:
         return []
     return _read_sheet_as_records(wb["Criteria"], ["Issue", "Assessment criteria"])
@@ -190,10 +207,14 @@ def diagnose_criteria_setup() -> str:
 
 
 def load_training_materials() -> dict:
-    """Read the 'Training materials' tab and group examples by normalized issue name."""
+    """Read the 'Training materials' tab and group examples by normalized issue name. Degrades
+    to an empty dict (rather than raising) if the file is missing, corrupted, or unreadable."""
     if not CRITERIA_XLSX.exists():
         return {}
-    wb = openpyxl.load_workbook(CRITERIA_XLSX, data_only=True)
+    try:
+        wb = openpyxl.load_workbook(CRITERIA_XLSX, data_only=True)
+    except Exception:
+        return {}
     if "Training materials" not in wb.sheetnames:
         return {}
     records = _read_sheet_as_records(
@@ -206,9 +227,11 @@ def load_training_materials() -> dict:
     return grouped
 
 
-def _build_checklist_block(criteria: list[dict], training_by_issue: dict) -> str:
+def _build_checklist_block(criteria: list[dict], training_by_issue: dict, checklist_exists: bool = True) -> str:
     if not criteria:
-        return "(No checklist found — library/QAQC_Agent_Training.xlsx is missing or its 'Criteria' tab is empty/unreadable.)"
+        if not checklist_exists:
+            return "(No checklist found — library/QAQC_Agent_Training.xlsx is missing or its 'Criteria' tab is empty/unreadable.)"
+        return "(No preset checklist issues were selected for this evaluation — only additional criteria below, if any, apply.)"
     lines = []
     for i, c in enumerate(criteria, 1):
         issue = str(c.get("Issue") or "").strip()
@@ -222,6 +245,22 @@ def _build_checklist_block(criteria: list[dict], training_by_issue: dict) -> str
                 f"at {ex.get('Location')} — {ex.get('Observation')}"
             )
     return "\n".join(lines)
+
+
+def _append_additional_criteria(checklist_block: str, additional_criteria: list[str], start_num: int) -> str:
+    """Append inspector-written, one-off criteria to the checklist block for this evaluation
+    only. These are never written back to QAQC_Agent_Training.xlsx — the preset checklist stays
+    untouched no matter how many additional criteria get added here."""
+    cleaned = [c.strip() for c in (additional_criteria or []) if c and c.strip()]
+    if not cleaned:
+        return checklist_block
+    extra_lines = [
+        f"{i}. ISSUE: {ac}\n   Assessment criteria: (Added by the inspector for this evaluation "
+        f"only, not part of the standard checklist — use general QA/QC judgment and any relevant "
+        f"code/standard.)"
+        for i, ac in enumerate(cleaned, start=start_num)
+    ]
+    return checklist_block + "\n\nADDITIONAL CRITERIA for this evaluation only (added by the inspector):\n" + "\n".join(extra_lines)
 
 
 # --------------------------------------------------------------------------------------
@@ -338,6 +377,30 @@ def append_to_library(photo_path: Path, category: str, comment: str, severity: s
 # --------------------------------------------------------------------------------------
 
 def _encode_image(path: Path):
+    """Read an image file and return (mime, base64_data). Phone photos routinely run 3-8MB,
+    which risks hitting the vision API's size limit and previously crashed the whole request —
+    so this downscales to a sane max dimension, auto-corrects EXIF rotation (phones store photos
+    "sideways" with a rotation flag; without this they'd appear rotated to the model), and
+    recompresses as JPEG. Falls back to sending the raw file if Pillow can't open it (e.g. an
+    unusual format) rather than failing the evaluation outright."""
+    if _PIL_AVAILABLE:
+        try:
+            with Image.open(path) as img:
+                img = ImageOps.exif_transpose(img)  # fix sideways/upside-down phone photos
+                img = img.convert("RGB")
+                img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION))
+                quality = 90
+                while True:
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=quality)
+                    data_bytes = buf.getvalue()
+                    if len(data_bytes) <= MAX_IMAGE_BYTES or quality <= 40:
+                        break
+                    quality -= 10
+                return "image/jpeg", base64.standard_b64encode(data_bytes).decode("utf-8")
+        except Exception:
+            pass  # fall through to sending the raw file
+
     mime, _ = mimetypes.guess_type(str(path))
     if mime is None:
         mime = "image/jpeg"
@@ -349,10 +412,18 @@ def _encode_image(path: Path):
 # Main evaluation
 # --------------------------------------------------------------------------------------
 
-def evaluate_photo(photo_path: Path, extra_context: str = "") -> str:
-    """Evaluate one photo against the full Issue/Assessment Criteria checklist, grounded in
-    training examples, stored feedback, and submittal context, with web search as a fallback
-    for codes/standards and for catching issues outside the checklist."""
+def evaluate_photo(photo_path: Path, extra_context: str = "", selected_issues: list[str] | None = None,
+                    additional_criteria: list[str] | None = None) -> str:
+    """Evaluate one photo against the Issue/Assessment Criteria checklist, grounded in training
+    examples, stored feedback, and submittal context, with web search as a fallback for
+    codes/standards and for catching issues outside the checklist.
+
+    selected_issues: if given, restricts evaluation to preset issues whose name matches one of
+    these (case/whitespace-insensitive) — None means use the full preset checklist. This never
+    modifies QAQC_Agent_Training.xlsx; it only narrows what's sent for THIS evaluation.
+    additional_criteria: inspector-written, one-off criteria to evaluate alongside the preset
+    checklist for this photo only — also never written back to the spreadsheet.
+    """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set. Set it before running (see setup notes).")
@@ -362,12 +433,18 @@ def evaluate_photo(photo_path: Path, extra_context: str = "") -> str:
             "Get a real key from console.anthropic.com and set it with setx (Windows)."
         )
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=4)  # ride out brief upstream 5xx/502 blips
     mime, b64 = _encode_image(photo_path)
 
-    criteria = load_criteria()
+    all_criteria = load_criteria()
+    if selected_issues is None:
+        criteria = all_criteria
+    else:
+        selected_norm = {_norm_issue(s) for s in selected_issues}
+        criteria = [c for c in all_criteria if _norm_issue(c.get("Issue")) in selected_norm]
     training_by_issue = load_training_materials()
-    checklist_block = _build_checklist_block(criteria, training_by_issue)
+    checklist_block = _build_checklist_block(criteria, training_by_issue, checklist_exists=bool(all_criteria))
+    checklist_block = _append_additional_criteria(checklist_block, additional_criteria, start_num=len(criteria) + 1)
 
     submittal_context = _load_submittal_context()
 

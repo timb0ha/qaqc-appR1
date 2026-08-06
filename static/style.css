@@ -168,6 +168,7 @@ button:hover, .button-link:hover { background: var(--orange-dark); }
 
 fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
 .radio-row { display: flex; align-items: flex-start; gap: 8px; font-weight: 400; padding: 4px 0; }
+.checkbox-row { display: flex; align-items: flex-start; gap: 8px; font-weight: 400; padding: 4px 0; font-size: 0.92rem; }
 
 details { margin-top: 10px; }
 details summary { cursor: pointer; color: var(--orange); font-weight: 600; }

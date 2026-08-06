@@ -19,6 +19,7 @@ import secrets
 from datetime import datetime
 from pathlib import Path
 
+import anthropic
 from flask import (Flask, render_template, request, redirect, url_for,
                     send_file, session, flash, abort)
 from werkzeug.utils import secure_filename
@@ -44,6 +45,17 @@ if not Path("templates/QAQC_Checklist_Template.xlsx").exists():
     build_template.build_template()
 
 ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def _friendly_api_error(e: Exception) -> str:
+    """Turn a raw Anthropic SDK exception into a message a field user can actually act on."""
+    if isinstance(e, (anthropic.InternalServerError, anthropic.APIConnectionError, anthropic.APITimeoutError)):
+        return "Claude's servers had a temporary problem responding. Please try again in a minute."
+    if isinstance(e, anthropic.RateLimitError):
+        return "Too many requests right now — please wait a bit and try again."
+    if isinstance(e, anthropic.APIStatusError):
+        return f"The API rejected this request ({e.status_code}): {e}"
+    return f"{type(e).__name__}: {e}"
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
@@ -131,7 +143,8 @@ def _safe_checklist_path(filename: str) -> Path:
 def evaluate():
     if request.method == "GET":
         diag = pe.diagnose_criteria_setup()
-        return render_template("evaluate.html", diag=diag)
+        criteria = pe.load_criteria()
+        return render_template("evaluate.html", diag=diag, criteria=criteria)
 
     files = [f for f in request.files.getlist("photos") if f and f.filename]
     if not files:
@@ -139,6 +152,10 @@ def evaluate():
         return redirect(url_for("evaluate"))
 
     notes = request.form.get("notes", "").strip()
+    selected_issues = request.form.getlist("selected_issues")
+    additional_criteria = [
+        line.strip() for line in request.form.get("additional_criteria", "").splitlines() if line.strip()
+    ]
     results = []
     for f in files:
         ext = Path(f.filename).suffix.lower()
@@ -152,9 +169,13 @@ def evaluate():
         f.save(saved_path)
 
         try:
-            report_text = pe.evaluate_photo(saved_path, extra_context=notes)
-        except RuntimeError as e:
-            results.append({"photo_name": f.filename, "error": str(e)})
+            report_text = pe.evaluate_photo(
+                saved_path, extra_context=notes,
+                selected_issues=selected_issues, additional_criteria=additional_criteria,
+            )
+        except Exception as e:
+            app.logger.exception(f"Evaluation failed for {f.filename}")
+            results.append({"photo_name": f.filename, "error": _friendly_api_error(e)})
             continue
 
         report_filename = f"{saved_path.stem}_QAQC_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
@@ -255,8 +276,9 @@ def submittals():
 
     try:
         report_text = sc.check_submittal(saved_path, requirement)
-    except RuntimeError as e:
-        flash(str(e), "error")
+    except Exception as e:
+        app.logger.exception(f"Submittal check failed for {f.filename}")
+        flash(_friendly_api_error(e), "error")
         return redirect(url_for("submittals"))
 
     report_filename = f"{saved_path.stem}_submittal_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"

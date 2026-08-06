@@ -21,6 +21,24 @@
     <textarea name="notes" rows="3" placeholder="e.g. Level 4, north wing, MEP rough-in"></textarea>
   </label>
 
+  {% if criteria %}
+  <fieldset>
+    <legend>Checklist issues to evaluate</legend>
+    <p class="hint">All preset issues are selected by default — uncheck any that don't apply to this photo. The preset list itself can only be changed by uploading a new spreadsheet on the Library page.</p>
+    {% for c in criteria %}
+      <label class="checkbox-row">
+        <input type="checkbox" name="selected_issues" value="{{ c['Issue'] }}" checked>
+        {{ c['Issue'] }}
+      </label>
+    {% endfor %}
+  </fieldset>
+  {% endif %}
+
+  <label>Additional criteria for this evaluation (optional, one per line)
+    <textarea name="additional_criteria" rows="3" placeholder="e.g. Confirm exit signage is illuminated"></textarea>
+  </label>
+  <p class="hint">These apply to this evaluation only — they are not saved to the preset checklist.</p>
+
   <button type="submit">Evaluate</button>
 </form>
 {% endblock %}
